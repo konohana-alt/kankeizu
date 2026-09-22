@@ -26,7 +26,7 @@ examples/
 
 エンジン＋DSL＋画像が1ファイルに完結したデモ。ダウンロードしてブラウザで開くだけで動く。
 
-👉 [bastille_demo.html をダウンロード](https://github.com/konohana-alt/kankeizu/raw/main/examples/bastille_demo.html)
+👉 [bastille_demo.html をダウンロード](https://github.com/konohana-alt/kankeizu/releases/download/v1.0.0/bastille_demo.html)
 
 ## 最短体験
 
