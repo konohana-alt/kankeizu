@@ -1,6 +1,6 @@
 # かんけいず！（仮）
 
-Canvas ベースの**相関図アニメーションエンジン**。JSON（DSL）を読み込み、人物の関係変化をステップごとにアニメーションで再生する。DSL はすべて AI（Claude / Gemini 等）に生成させる想定で設計されている。
+Canvas ベースの**相関図アニメーションエンジン**。JSON 形式の DSL（Domain-Specific Language＝脚本）を読み込み、人物の関係変化をステップごとにアニメーションで再生する。DSL はすべて AI（Claude / Gemini 等）に生成させる想定で設計されている。
 
 ## 構成
 
@@ -31,16 +31,32 @@ examples/
 ## 最短体験
 
 1. 上記リンクからデモをダウンロードし、ブラウザで開く → そのまま動く
-2. `engine/kankeizu_engine.html` を開き、「脚本を編集」パネルに自分のDSLを貼り付ける
+2. `engine/kankeizu_engine.html` を開き、「脚本を編集」パネルに自分の DSL（脚本 JSON）を貼り付ける
 
 ## 新しい物語を作る（AI + MCP）
+
+### Remote MCP（インストール不要・推奨）
+
+Node.js 不要。Claude Desktop / Claude Code の設定に以下を追加するだけ：
+
+```json
+{
+  "mcpServers": {
+    "kankeizu-dsl": {
+      "url": "https://nwkjo52kv6.execute-api.ap-northeast-1.amazonaws.com/prod/"
+    }
+  }
+}
+```
+
+### ローカル MCP（Node.js 環境がある場合）
 
 ```bash
 cd mcp
 npm install
 ```
 
-MCPクライアント（Claude Code / Claude Desktop 等）の設定に追加：
+MCPクライアントの設定に追加：
 
 ```json
 {
@@ -53,7 +69,7 @@ MCPクライアント（Claude Code / Claude Desktop 等）の設定に追加：
 }
 ```
 
-`agent-prompt.md` の手順に沿ってAIにDSLを生成させ、`engine/kankeizu_engine.html` の「脚本を編集」パネルに貼り付けて確認する。
+どちらの方法でも `validate_dsl` 等のツールが使える。`agent-prompt.md` の手順に沿って AI に DSL（脚本）を生成させ、`engine/kankeizu_engine.html` の「脚本を編集」パネルに貼り付けて確認する。
 
 ## エンジンの主な機能
 
