@@ -20,9 +20,17 @@ examples/
   bastille_sources.md       デモの史実出典一覧
 ```
 
+## Example
+
+**バスティーユ襲撃デモ**（フランス革命・1789年7月14日）
+
+エンジン＋DSL＋画像が1ファイルに完結したデモ。ダウンロードしてブラウザで開くだけで動く。
+
+👉 [bastille_demo.html をダウンロード](https://github.com/konohana-alt/kankeizu/raw/main/examples/bastille_demo.html)
+
 ## 最短体験
 
-1. `examples/bastille_demo.html` をブラウザで開く → そのまま動く
+1. 上記リンクからデモをダウンロードし、ブラウザで開く → そのまま動く
 2. `engine/kankeizu_engine.html` を開き、「脚本を編集」パネルに自分のDSLを貼り付ける
 
 ## 新しい物語を作る（AI + MCP）
