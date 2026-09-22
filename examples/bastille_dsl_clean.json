@@ -1,0 +1,382 @@
+{
+  "sources": [
+    {
+      "label": "出典一覧を見る",
+      "url": "https://claude.ai/artifact/2WbQNQxwck3nggFRKDw8aB"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "desmoulins",
+      "label": "デムーラン",
+      "x": 595,
+      "y": 262,
+      "appearsAt": "1789-07-12 12:00",
+      "groupHistory": [
+        {
+          "step": "1789-07-12 12:00",
+          "groupId": "palais_royal"
+        }
+      ],
+      "icon": "desmoulins",
+      "statusHistory": [
+        {
+          "step": "1789-07-12 12:00",
+          "statuses": [
+            {
+              "status": "roses"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "delaunay",
+      "label": "ド・ローネ侯爵",
+      "x": 920,
+      "y": 460,
+      "groupHistory": [
+        {
+          "step": "1789-07-14 06:00",
+          "groupId": "bastille"
+        },
+        {
+          "step": "1789-07-14 19:30",
+          "groupId": "hoteldeville"
+        }
+      ],
+      "icon": "delaunay",
+      "statusHistory": [
+        {
+          "step": "1789-07-14 15:00",
+          "statuses": [
+            {
+              "status": "sweat",
+              "corner": "top-right"
+            }
+          ]
+        },
+        {
+          "step": "1789-07-14 19:30",
+          "statuses": [
+            {
+              "status": "angel",
+              "corner": "top-center"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "crowd",
+      "label": "民衆",
+      "x": 595,
+      "y": 262,
+      "groupHistory": [
+        {
+          "step": "1789-07-12 12:00",
+          "groupId": "palais_royal"
+        },
+        {
+          "step": "1789-07-14 06:00",
+          "groupId": "invalides"
+        },
+        {
+          "step": "1789-07-14 10:00",
+          "groupId": "bastille"
+        },
+        {
+          "step": "1789-07-14 19:30",
+          "groupId": "hoteldeville"
+        }
+      ],
+      "icon": "crowd",
+      "statusHistory": [
+        {
+          "step": "1789-07-14 06:00",
+          "statuses": [
+            {
+              "text": "食べ物をくれッ！",
+              "corner": "top-center"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "maillard",
+      "label": "マイヤール",
+      "x": 940,
+      "y": 460,
+      "appearsAt": "1789-07-14 10:00",
+      "groupHistory": [
+        {
+          "step": "1789-07-14 10:00",
+          "groupId": "bastille"
+        }
+      ],
+      "icon": "maillard"
+    },
+    {
+      "id": "hulin",
+      "label": "ユラン",
+      "x": 940,
+      "y": 500,
+      "appearsAt": "1789-07-14 15:00",
+      "groupHistory": [
+        {
+          "step": "1789-07-14 15:00",
+          "groupId": "bastille"
+        }
+      ],
+      "icon": "hulin"
+    },
+    {
+      "id": "elie",
+      "label": "エリー",
+      "x": 960,
+      "y": 500,
+      "appearsAt": "1789-07-14 15:00",
+      "groupHistory": [
+        {
+          "step": "1789-07-14 15:00",
+          "groupId": "bastille"
+        }
+      ],
+      "icon": "elie"
+    },
+    {
+      "id": "muskets",
+      "label": "銃3万丁",
+      "x": 175,
+      "y": 418,
+      "appearsAt": "1789-07-14 06:00",
+      "icon": "gunfire",
+      "groupHistory": [
+        {
+          "step": "1789-07-14 06:00",
+          "groupId": "invalides"
+        },
+        {
+          "step": "1789-07-14 10:00",
+          "groupId": "bastille"
+        }
+      ]
+    },
+    {
+      "id": "gunpowder",
+      "label": "火薬・大砲",
+      "x": 940,
+      "y": 480,
+      "appearsAt": "1789-07-14 10:00",
+      "icon": "gunpowder_keg",
+      "groupHistory": [
+        {
+          "step": "1789-07-14 10:00",
+          "groupId": "bastille"
+        }
+      ]
+    }
+  ],
+  "groups": [
+    {
+      "id": "palais_royal",
+      "label": "パレ・ロワイヤル",
+      "x": 595,
+      "y": 262,
+      "radius": 90
+    },
+    {
+      "id": "invalides",
+      "label": "アンヴァリッド",
+      "x": 175,
+      "y": 418,
+      "radius": 90
+    },
+    {
+      "id": "bastille",
+      "label": "バスティーユ要塞",
+      "x": 940,
+      "y": 480,
+      "radius": 90
+    },
+    {
+      "id": "hoteldeville",
+      "label": "市庁舎",
+      "x": 742,
+      "y": 400,
+      "radius": 90
+    }
+  ],
+  "edges": [
+    {
+      "id": "e1",
+      "from": "crowd",
+      "to": "delaunay",
+      "history": [
+        {
+          "step": "1789-07-14 10:00",
+          "label": "対峙",
+          "style": "solid"
+        },
+        {
+          "step": "1789-07-14 17:00",
+          "label": "降伏",
+          "style": "thick_red",
+          "overlay": true
+        },
+        {
+          "step": "1789-07-14 19:30",
+          "label": "処刑",
+          "style": "thick_red",
+          "overlay": true
+        }
+      ]
+    },
+    {
+      "id": "e2",
+      "from": "hulin",
+      "to": "crowd",
+      "history": [
+        {
+          "step": "1789-07-14 15:00",
+          "label": "合流",
+          "style": "solid"
+        }
+      ]
+    },
+    {
+      "id": "e3",
+      "from": "elie",
+      "to": "crowd",
+      "history": [
+        {
+          "step": "1789-07-14 15:00",
+          "label": "合流",
+          "style": "solid"
+        }
+      ]
+    },
+    {
+      "id": "e4",
+      "from": "maillard",
+      "to": "delaunay",
+      "history": [
+        {
+          "step": "1789-07-14 17:00",
+          "label": "降伏交渉",
+          "style": "thick_red"
+        }
+      ]
+    },
+    {
+      "id": "e5",
+      "from": "desmoulins",
+      "to": "crowd",
+      "history": [
+        {
+          "step": "1789-07-12 12:00",
+          "label": "決起を扇動",
+          "style": "thick_red"
+        }
+      ]
+    }
+  ],
+  "timeline": [
+    {
+      "step": "1789-07-12 12:00",
+      "narrative": "ネッケル罷免の報がパリに届くと、デムーランはパレ・ロワイヤルの群衆に武器を取るよう訴えた。",
+      "focus": {
+        "nodeIds": [
+          "desmoulins",
+          "crowd"
+        ],
+        "zoom": 1.5
+      }
+    },
+    {
+      "step": "1789-07-14 06:00",
+      "narrative": "夜明け、パリの群衆はまずアンヴァリッドへ押し寄せ、眠っていた3万丁の銃を奪い取った。だが弾薬はほとんど無かった。",
+      "focus": {
+        "nodeIds": [
+          "crowd",
+          "muskets"
+        ],
+        "zoom": 1.6
+      }
+    },
+    {
+      "step": "1789-07-14 10:00",
+      "narrative": "残る火薬はバスティーユにあるという。900人ほどの群衆が要塞前に集まり、火薬と大砲の引き渡しを要求した。",
+      "focus": {
+        "nodeIds": [
+          "crowd",
+          "delaunay",
+          "gunpowder"
+        ],
+        "zoom": 1.3
+      }
+    },
+    {
+      "step": "1789-07-14 12:30",
+      "narrative": "交渉は決裂し、中庭になだれ込んだ群衆に向け、守備側が発砲。戦闘が始まった。",
+      "focus": {
+        "edgeId": "e1",
+        "zoom": 1.25
+      },
+      "soundEffect": "medium_gunfire"
+    },
+    {
+      "step": "1789-07-14 15:00",
+      "narrative": "反乱を起こしたフランス衛兵の一団が、ユランとエリーに率いられて群衆に合流。大砲を持ち込み、門へと向けた。",
+      "focus": {
+        "nodeIds": [
+          "hulin",
+          "elie",
+          "crowd"
+        ],
+        "zoom": 1.4
+      },
+      "soundEffect": "light_cannon"
+    },
+    {
+      "step": "1789-07-14 16:30",
+      "narrative": "門は大砲の砲撃に耐えられぬと悟り、ド・ローネは火薬庫を爆破すると脅すが、部下に押しとどめられた。",
+      "focus": {
+        "nodeId": "delaunay",
+        "zoom": 1.5
+      },
+      "soundEffect": "heavy_cannon"
+    },
+    {
+      "step": "1789-07-14 17:00",
+      "narrative": "マイヤールが濠に渡した板を伝ってド・ローネの降伏条件を受け取り、17時頃、跳ね橋が下ろされた。",
+      "focus": {
+        "edgeId": "e4",
+        "zoom": 1.3
+      },
+      "activeEdge": "e1",
+      "soundEffect": "surrender"
+    },
+    {
+      "step": "1789-07-14 18:00",
+      "narrative": "群衆がなだれ込み、7人の囚人を解放。火薬と大砲を押収した。",
+      "focus": {
+        "nodeIds": [
+          "crowd"
+        ],
+        "zoom": 1.5
+      }
+    },
+    {
+      "step": "1789-07-14 19:30",
+      "narrative": "ド・ローネは市庁舎まで引きずられ、殴打の末に斬首された。その首は槍の先に掲げられ、街を練り歩いた。",
+      "focus": {
+        "edgeId": "e1",
+        "zoom": 1.3
+      },
+      "activeEdge": "e1",
+      "soundEffect": "strikethrough"
+    }
+  ]
+}

@@ -1,0 +1,921 @@
+/**
+ * 「かんけいず！（仮）」DSLバリデーター
+ *
+ * kankeizu_prototype.html の validateDsl() と完全に同じルールを、
+ * 「最初のエラーで例外を投げる」のではなく「全エラー・全警告を集めて返す」形に
+ * 書き直したもの。AIがDSLを生成→検証→自己修正するループに向いている。
+ *
+ * 2つのファイルは意図的に分離されている（プロトタイプ側はブラウザ単体で動く必要があり、
+ * このMCPサーバーはNode.js側で動く）。ルールを変更したときは両方を同期させること。
+ */
+
+const TIME_OF_DAY_RE = /^(\d{4}-\d{2}-\d{2}\s)?([01]\d|2[0-3]):([0-5]\d)$/;
+const STEP_TIMESTAMP_RE = /^(\d{4})-(\d{2})-(\d{2})\s([01]\d|2[0-3]):([0-5]\d)$/;
+
+const KNOWN_ICONS = ["farmer", "cook", "person", "gunfire", "clash", "punch", "argument", "cannon", "gunpowder_keg"];
+const KNOWN_STATUS_ICONS = ["sweat", "angel", "anger", "dizzy", "sparkle", "question", "roses"];
+const KNOWN_STATUS_CORNERS = [
+  "top-left", "top-center", "top-right",
+  "middle-left", "middle-center", "middle-right",
+  "bottom-left", "bottom-center", "bottom-right"
+];
+const KNOWN_EDGE_ICONS = ["heart"];
+const KNOWN_STYLES = ["solid", "thick_red"];
+const KNOWN_EDGE_COLORS = ["default", "red", "blue", "green", "gold", "purple", "pink", "gray"];
+const KNOWN_EDGE_WEIGHTS = ["normal", "thick"];
+const KNOWN_EFFECT_KINDS = ["gunfire", "cannon", "clash", "punch", "argument"];
+const KNOWN_EFFECT_INTENSITIES = ["light", "medium", "heavy"];
+const EFFECT_SPEC_RE = /^(light|medium|heavy)_(gunfire|cannon|clash|punch|argument)$/;
+
+// 戦闘エフェクトのつもりで書いたが、表記が微妙にズレている(区切り文字違い・スペル違い等)ケースを検出する。
+// 完全に無関係な文字列（"strikethrough"等）は誤検出しないよう、既知の語を部分文字列として含む場合のみ拾う。
+function looksLikeMistypedEffect(value) {
+  if (typeof value !== "string") return false;
+  if (KNOWN_EFFECT_KINDS.includes(value)) return false;
+  if (EFFECT_SPEC_RE.test(value)) return false;
+  return KNOWN_EFFECT_KINDS.some((k) => value.includes(k));
+}
+
+function isValidTimeOfDayString(str) {
+  return typeof str === "string" && TIME_OF_DAY_RE.test(str);
+}
+
+function isValidStepValue(v) {
+  return typeof v === "number" || (typeof v === "string" && STEP_TIMESTAMP_RE.test(v));
+}
+
+function stepKind(v) {
+  if (typeof v === "number") return "number";
+  if (typeof v === "string" && STEP_TIMESTAMP_RE.test(v)) return "timestamp";
+  return "invalid";
+}
+
+// エンジン(kankeizu_prototype.html)側のparseStepTimestamp/parseTimeOfDayMinutesと同じロジック。
+// グループの同時人数をシミュレートするために、所属解決ロジックもこちらに移植する。
+function parseStepTimestamp(v) {
+  if (typeof v === "number") return v;
+  const m = STEP_TIMESTAMP_RE.exec(v);
+  if (!m) return null;
+  return new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5]).getTime();
+}
+
+function parseTimeOfDayMinutes(str) {
+  const m = TIME_OF_DAY_RE.exec(str);
+  if (!m) return null;
+  return parseInt(m[2], 10) * 60 + parseInt(m[3], 10);
+}
+
+// ---------------------------------------------------------------------------
+// グループの同時人数チェック
+//
+// 物語の文章には「エリアが手狭になった」とは書かれないので、これはテキスト読解では
+// 気づけない。誰が・いつ・どのグループにいるかという構造から機械的に導ける問題なので、
+// バリデーターの仕事にする。エンジン(kankeizu_prototype.html)のノード配置ロジック
+// （stableSlotInAnchor：アンカーから0.35〜0.7×radiusの環状帯にランダム配置）と
+// 同じ前提で「このradiusなら窮屈にならず何人まで置けるか」を見積もる。
+// ---------------------------------------------------------------------------
+
+const NODE_FOOTPRINT_W = 116, NODE_FOOTPRINT_H = 92; // エンジン側のポラロイド枠サイズと同じ
+const DEFAULT_GROUP_RADIUS = 130; // エンジン側のringSlotFor等のデフォルト値と同じ
+
+function isNodeVisibleAt(node, stepValue) {
+  if (node.appearsAt == null) return true;
+  const a = parseStepTimestamp(node.appearsAt);
+  const s = parseStepTimestamp(stepValue);
+  if (a == null || s == null) return true; // 型が壊れている場合は別のエラーで既に拾っているのでここでは素通しする
+  return s >= a;
+}
+
+function groupIdFromHistoryAt(node, stepValue) {
+  if (!node.groupHistory || !node.groupHistory.length) return undefined;
+  const s = parseStepTimestamp(stepValue);
+  const sorted = node.groupHistory
+    .slice()
+    .filter((gh) => isValidStepValue(gh.step))
+    .sort((a, b) => parseStepTimestamp(a.step) - parseStepTimestamp(b.step));
+  let current;
+  for (const gh of sorted) {
+    const gs = parseStepTimestamp(gh.step);
+    if (s != null && gs <= s) current = gh.groupId;
+    else break;
+  }
+  return current;
+}
+
+function scheduleGroupIdAt(node, minutesOfDay) {
+  if (!node.schedule || !node.schedule.length) return undefined;
+  const sorted = node.schedule
+    .slice()
+    .filter((s) => isValidTimeOfDayString(s.time))
+    .sort((a, b) => parseTimeOfDayMinutes(a.time) - parseTimeOfDayMinutes(b.time));
+  if (!sorted.length) return undefined;
+  let chosen = null;
+  for (const s of sorted) {
+    const m = parseTimeOfDayMinutes(s.time);
+    if (m <= minutesOfDay) chosen = s.groupId;
+  }
+  if (chosen === null) chosen = sorted[sorted.length - 1].groupId; // 日をまたぐラップアラウンド
+  return chosen;
+}
+
+// 優先順位：groupHistory(明示的な例外) > schedule(生活パターン) > 未使用(undefined)
+function resolveGroupIdAt(node, stepValue) {
+  const fromHistory = groupIdFromHistoryAt(node, stepValue);
+  if (fromHistory !== undefined) return fromHistory;
+  if (typeof stepValue === "string") {
+    const minutes = parseTimeOfDayMinutes(stepValue);
+    if (minutes != null) {
+      const fromSchedule = scheduleGroupIdAt(node, minutes);
+      if (fromSchedule !== undefined) return fromSchedule;
+    }
+  }
+  return undefined;
+}
+
+// アンカーから0.35r〜0.7rの環状帯に、ノードの外形サイズ分の面積がいくつ収まるか、の粗い見積もり
+function estimateGroupCapacity(radius) {
+  const r = radius != null ? radius : DEFAULT_GROUP_RADIUS;
+  const annulusArea = Math.PI * r * r * (0.7 * 0.7 - 0.35 * 0.35);
+  const footprintArea = NODE_FOOTPRINT_W * NODE_FOOTPRINT_H;
+  return Math.max(1, Math.floor(annulusArea / footprintArea));
+}
+
+// タイムライン全体を通して、各グループの同時最大人数を推定し、radiusに対して
+// 詰め込みすぎていないかを警告する。groupHistory/scheduleの切り替わりポイントでのみ
+// 人数が変化するため、その切り替わりポイントを漏れなくサンプリングすれば正確に判定できる。
+function checkGroupCapacity(dsl, warn) {
+  const groups = Array.isArray(dsl.groups) ? dsl.groups : [];
+  if (!groups.length) return;
+  const nodes = Array.isArray(dsl.nodes) ? dsl.nodes : [];
+  const groupById = {};
+  groups.forEach((g) => { if (g && g.id) groupById[g.id] = g; });
+  if (!Object.keys(groupById).length) return;
+
+  // サンプルすべきstep値：timelineの全step + 全nodeのgroupHistoryのstep
+  const sampleSteps = new Set();
+  (dsl.timeline || []).forEach((t) => { if (t && isValidStepValue(t.step)) sampleSteps.add(t.step); });
+  nodes.forEach((n) => {
+    if (n && n.groupHistory) {
+      n.groupHistory.forEach((gh) => { if (gh && isValidStepValue(gh.step)) sampleSteps.add(gh.step); });
+    }
+  });
+
+  // scheduleを使っているノードがいれば、timeline中に登場する日付それぞれについて、
+  // scheduleのHH:MM切り替わり時刻もサンプル点として追加する
+  const datesInTimeline = new Set();
+  (dsl.timeline || []).forEach((t) => {
+    if (t && typeof t.step === "string") {
+      const m = /^(\d{4}-\d{2}-\d{2})\s/.exec(t.step);
+      if (m) datesInTimeline.add(m[1]);
+    }
+  });
+  const hasSchedule = nodes.some((n) => n && n.schedule && n.schedule.length);
+  if (hasSchedule && datesInTimeline.size) {
+    nodes.forEach((n) => {
+      if (!n || !n.schedule) return;
+      n.schedule.forEach((s) => {
+        if (!s || !isValidTimeOfDayString(s.time)) return;
+        const timeMatch = /([01]\d|2[0-3]):[0-5]\d$/.exec(s.time);
+        if (!timeMatch) return;
+        datesInTimeline.forEach((date) => sampleSteps.add(`${date} ${timeMatch[0]}`));
+      });
+    });
+  }
+
+  if (!sampleSteps.size) return;
+
+  const peakByGroup = {}; // groupId -> { count, atStep }
+  sampleSteps.forEach((stepValue) => {
+    const countByGroup = {};
+    nodes.forEach((n) => {
+      if (!n || !isNodeVisibleAt(n, stepValue)) return;
+      const gid = resolveGroupIdAt(n, stepValue);
+      if (gid == null || !groupById[gid]) return;
+      countByGroup[gid] = (countByGroup[gid] || 0) + 1;
+    });
+    Object.keys(countByGroup).forEach((gid) => {
+      const c = countByGroup[gid];
+      if (!peakByGroup[gid] || c > peakByGroup[gid].count) {
+        peakByGroup[gid] = { count: c, atStep: stepValue };
+      }
+    });
+  });
+
+  Object.keys(peakByGroup).forEach((gid) => {
+    const group = groupById[gid];
+    const peak = peakByGroup[gid];
+    const capacity = estimateGroupCapacity(group.radius);
+    if (peak.count > capacity) {
+      warn(
+        `group "${gid}"(${group.label || ""}) はstep ${peak.atStep} 付近で同時${peak.count}人になり、` +
+        `宣言されたradius=${group.radius != null ? group.radius : DEFAULT_GROUP_RADIUS}（目安${capacity}人程度まで）` +
+        `を超えます。エンジン側で読み込み時に自動的にradiusが底上げされるため対応は必須ではありませんが、` +
+        `意図した見た目と違う場合はradiusを明示的に大きくするか、サブグループへの分割を検討してください。`
+      );
+    }
+  });
+}
+
+
+/**
+ * @param {any} dsl - パース済みのDSLオブジェクト（JSON.parseした後のもの）
+ * @returns {{ valid: boolean, errors: string[], warnings: string[] }}
+ */
+function validateDsl(dsl) {
+  const errors = [];
+  const warnings = [];
+  const err = (msg) => errors.push(msg);
+  const warn = (msg) => warnings.push(msg);
+
+  if (!dsl || typeof dsl !== "object" || Array.isArray(dsl)) {
+    err("DSLはオブジェクトである必要があります");
+    return { valid: false, errors, warnings };
+  }
+
+  if (!Array.isArray(dsl.nodes) || dsl.nodes.length === 0) {
+    err("nodes は1件以上の配列が必要です");
+  }
+  if (!Array.isArray(dsl.timeline) || dsl.timeline.length === 0) {
+    err("timeline は1件以上の配列が必要です");
+  }
+  const edges = Array.isArray(dsl.edges) ? dsl.edges : [];
+  if (dsl.edges != null && !Array.isArray(dsl.edges)) {
+    err("edges は配列である必要があります（省略も可）");
+  }
+  const groups = Array.isArray(dsl.groups) ? dsl.groups : [];
+  if (dsl.groups != null && !Array.isArray(dsl.groups)) {
+    err("groups は配列である必要があります（省略も可）");
+  }
+  if (dsl.sources != null) {
+    if (!Array.isArray(dsl.sources)) {
+      err("sources は配列である必要があります（省略も可）");
+    } else {
+      dsl.sources.forEach((s, i) => {
+        if (!s || typeof s.label !== "string" || typeof s.url !== "string") {
+          err(`sources[${i}] には label(文字列) と url(文字列) が必要です`);
+        }
+      });
+    }
+  }
+
+  if (dsl.assets != null) {
+    if (typeof dsl.assets !== "object" || Array.isArray(dsl.assets)) {
+      err("assets はオブジェクト（{ キー: { mime, base64 } または { url } }の形）である必要があります（省略も可）");
+    } else {
+      Object.keys(dsl.assets).forEach((key) => {
+        const a = dsl.assets[key];
+        if (!a || (typeof a.base64 !== "string" && typeof a.url !== "string")) {
+          err(`assets.${key} には base64(文字列) または url(文字列) のいずれかが必要です`);
+        }
+        if (a && a.mime != null && typeof a.mime !== "string") {
+          err(`assets.${key} の mime は文字列である必要があります`);
+        }
+      });
+    }
+  }
+
+  if (dsl.mapBackground != null) {
+    const mb = dsl.mapBackground;
+    if (typeof mb.base64 !== "string" && typeof mb.url !== "string") {
+      err("mapBackground には base64(文字列) または url(文字列) のいずれかが必要です");
+    }
+    if (typeof mb.width !== "number" || typeof mb.height !== "number") {
+      err("mapBackground には width, height (数値、画像のピクセルサイズ) が必要です");
+    }
+    if (mb.mime != null && typeof mb.mime !== "string") err("mapBackground の mime は文字列である必要があります");
+    if (mb.opacity != null && typeof mb.opacity !== "number") err("mapBackground の opacity は数値である必要があります");
+  }
+
+  // ---- groups ----
+  const groupIds = {};
+  const seenGroupIds = new Set();
+  groups.forEach((g, i) => {
+    const tag = `group[${i}]`;
+    if (!g || typeof g !== "object") { err(`${tag} はオブジェクトである必要があります`); return; }
+    if (!g.id || !g.label) err(`${tag}(${g.id || "?"}) には id と label が必要です`);
+    if (typeof g.x !== "number" || typeof g.y !== "number") {
+      err(`group ${g.id || i} に x, y (数値・アンカー座標) が必要です`);
+    }
+    if (g.radius != null && typeof g.radius !== "number") {
+      err(`group ${g.id} の radius は数値である必要があります`);
+    }
+    if (g.allowShrink != null && typeof g.allowShrink !== "boolean") {
+      err(`group ${g.id} の allowShrink は真偽値である必要があります`);
+    }
+    if (g.id) {
+      if (seenGroupIds.has(g.id)) warn(`group id "${g.id}" が重複しています`);
+      seenGroupIds.add(g.id);
+      groupIds[g.id] = true;
+    }
+  });
+
+  if (dsl.ungroupedArea != null) {
+    const ua = dsl.ungroupedArea;
+    if (typeof ua.x !== "number" || typeof ua.y !== "number") {
+      err("ungroupedArea に x, y (数値) が必要です");
+    }
+    if (ua.radius != null && typeof ua.radius !== "number") {
+      err("ungroupedArea の radius は数値である必要があります");
+    }
+    if (ua.allowShrink != null && typeof ua.allowShrink !== "boolean") {
+      err("ungroupedArea の allowShrink は真偽値である必要があります");
+    }
+  }
+
+  // ---- nodes ----
+  const ids = {};
+  const seenNodeIds = new Set();
+  const stepKindsUsed = new Set();
+  const nodes = Array.isArray(dsl.nodes) ? dsl.nodes : [];
+
+  nodes.forEach((n, i) => {
+    const tag = `node[${i}]`;
+    if (!n || typeof n !== "object") { err(`${tag} はオブジェクトである必要があります`); return; }
+    if (!n.id || !n.label) err(`${tag}(${n.id || "?"}) には id と label が必要です`);
+    if (typeof n.x !== "number" || typeof n.y !== "number") {
+      err(`node ${n.id || i} に x, y (数値) が必要です`);
+    }
+    if (n.id) {
+      if (seenNodeIds.has(n.id)) err(`node id "${n.id}" が重複しています`);
+      seenNodeIds.add(n.id);
+    }
+
+    if (n.appearsAt != null) {
+      if (!isValidStepValue(n.appearsAt)) {
+        err(`node ${n.id} の appearsAt は数値、または "YYYY-MM-DD HH:MM" 形式の時刻である必要があります`);
+      } else {
+        stepKindsUsed.add(stepKind(n.appearsAt));
+      }
+    }
+
+    if (n.icon != null) {
+      if (typeof n.icon !== "string") {
+        err(`node ${n.id} の icon は文字列である必要があります`);
+      } else if (!KNOWN_ICONS.includes(n.icon)) {
+        const hasMatchingAsset = dsl.assets && Object.prototype.hasOwnProperty.call(dsl.assets, n.icon);
+        if (!hasMatchingAsset) {
+          warn(`node ${n.id} の icon "${n.icon}" は既知のアイコン(${KNOWN_ICONS.join("/")})に無く、` +
+            `同名のassetsも見つからないため、頭文字プレースホルダーにフォールバックします`);
+        }
+      }
+    }
+
+    if (n.groupHistory != null) {
+      if (!Array.isArray(n.groupHistory) || n.groupHistory.length === 0) {
+        err(`node ${n.id} の groupHistory は1件以上の配列が必要です`);
+      } else {
+        n.groupHistory.forEach((gh, gi) => {
+          if (!isValidStepValue(gh.step)) {
+            err(`node ${n.id} の groupHistory[${gi}].step は数値、または "YYYY-MM-DD HH:MM" 形式の時刻である必要があります`);
+          } else {
+            stepKindsUsed.add(stepKind(gh.step));
+          }
+          if (gh.groupId !== null && typeof gh.groupId !== "string") {
+            err(`node ${n.id} の groupHistory[${gi}].groupId は文字列かnull(無所属)である必要があります`);
+          } else if (gh.groupId !== null && !groupIds[gh.groupId]) {
+            err(`node ${n.id} の groupHistory に存在しないgroupId("${gh.groupId}")があります`);
+          }
+        });
+      }
+    }
+
+    if (n.schedule != null) {
+      if (!Array.isArray(n.schedule) || n.schedule.length === 0) {
+        err(`node ${n.id} の schedule は1件以上の配列が必要です`);
+      } else {
+        n.schedule.forEach((s, si) => {
+          if (!isValidTimeOfDayString(s.time)) {
+            err(`node ${n.id} の schedule[${si}].time は "HH:MM" または "YYYY-MM-DD HH:MM" 形式である必要があります`);
+          }
+          if (s.groupId !== null && typeof s.groupId !== "string") {
+            err(`node ${n.id} の schedule[${si}].groupId は文字列かnull(無所属)である必要があります`);
+          } else if (s.groupId !== null && !groupIds[s.groupId]) {
+            err(`node ${n.id} の schedule に存在しないgroupId("${s.groupId}")があります`);
+          }
+        });
+      }
+    }
+
+    if (n.statusHistory != null) {
+      if (!Array.isArray(n.statusHistory) || n.statusHistory.length === 0) {
+        err(`node ${n.id} の statusHistory は1件以上の配列が必要です`);
+      } else {
+        n.statusHistory.forEach((sh, shi) => {
+          if (!isValidStepValue(sh.step)) {
+            err(`node ${n.id} の statusHistory[${shi}].step は数値、または "YYYY-MM-DD HH:MM" 形式の時刻である必要があります`);
+          }
+          if (!Array.isArray(sh.statuses) || sh.statuses.length === 0) {
+            err(`node ${n.id} の statusHistory[${shi}].statuses は1件以上の配列である必要があります（例：[{"status":"sparkle"}]）`);
+          } else {
+            sh.statuses.forEach((s, si) => {
+              if (s.status == null && s.text == null) {
+                err(`node ${n.id} の statusHistory[${shi}].statuses[${si}] には status(アイコン) または text(セリフ文字列) のいずれかが必要です`);
+              }
+              if (s.text != null && typeof s.text !== "string") {
+                err(`node ${n.id} の statusHistory[${shi}].statuses[${si}].text は文字列である必要があります`);
+              }
+              if (s.status != null && typeof s.status !== "string") {
+                err(`node ${n.id} の statusHistory[${shi}].statuses[${si}].status は文字列である必要があります`);
+              } else if (s.status != null && !KNOWN_STATUS_ICONS.includes(s.status)) {
+                // 組み込みの語彙には無いが、dsl.assetsに同名キーがあればカスタム状態として有効
+                const hasMatchingAsset = dsl.assets && Object.prototype.hasOwnProperty.call(dsl.assets, s.status);
+                if (!hasMatchingAsset) {
+                  warn(`node ${n.id} の statusHistory[${shi}].statuses[${si}].status "${s.status}" は既知の状態(${KNOWN_STATUS_ICONS.join("/")})に無く、` +
+                    `同名のassetsも見つからないため、表示されません（カスタム状態にする場合はassets.${s.status}を定義してください）`);
+                } else if (s.type == null) {
+                  warn(`node ${n.id} の statusHistory[${shi}].statuses[${si}].status "${s.status}" はカスタム状態です。` +
+                    `type("corner"または"frame")を省略するとcorner扱いになります。意図した表示か確認してください`);
+                }
+              }
+              if (s.corner != null && !KNOWN_STATUS_CORNERS.includes(s.corner)) {
+                err(`node ${n.id} の statusHistory[${shi}].statuses[${si}].corner は ${KNOWN_STATUS_CORNERS.join("/")} のいずれかである必要があります`);
+              }
+              if (s.type != null && !["corner", "frame"].includes(s.type)) {
+                err(`node ${n.id} の statusHistory[${shi}].statuses[${si}].type は corner または frame である必要があります`);
+              }
+            });
+          }
+        });
+      }
+    }
+
+    if (n.iconHistory != null) {
+      if (!Array.isArray(n.iconHistory) || n.iconHistory.length === 0) {
+        err(`node ${n.id} の iconHistory は1件以上の配列が必要です`);
+      } else {
+        n.iconHistory.forEach((ih, ihi) => {
+          if (!isValidStepValue(ih.step)) {
+            err(`node ${n.id} の iconHistory[${ihi}].step は数値、または "YYYY-MM-DD HH:MM" 形式の時刻である必要があります`);
+          }
+          if (typeof ih.icon !== "string") {
+            err(`node ${n.id} の iconHistory[${ihi}].icon は文字列である必要があります`);
+          } else if (!KNOWN_ICONS.includes(ih.icon)) {
+            const hasMatchingAsset = dsl.assets && Object.prototype.hasOwnProperty.call(dsl.assets, ih.icon);
+            if (!hasMatchingAsset) {
+              warn(`node ${n.id} の iconHistory[${ihi}].icon "${ih.icon}" は既知のアイコン(${KNOWN_ICONS.join("/")})に無く、` +
+                `同名のassetsも見つからないため、頭文字プレースホルダーにフォールバックします`);
+            }
+          }
+        });
+      }
+    }
+
+    if (n.id) ids[n.id] = true;
+  });
+
+  // ---- edges ----
+  const seenEdgeIds = new Set();
+  edges.forEach((e, i) => {
+    const tag = `edge[${i}]`;
+    if (!e || typeof e !== "object") { err(`${tag} はオブジェクトである必要があります`); return; }
+    if (!e.id || !e.from || !e.to) err(`${tag}(${e.id || "?"}) には id, from, to が必要です`);
+    if (e.id) {
+      if (seenEdgeIds.has(e.id)) err(`edge id "${e.id}" が重複しています`);
+      seenEdgeIds.add(e.id);
+    }
+    if (e.from && !ids[e.from]) err(`edge ${e.id} の from("${e.from}")が nodes に存在しません`);
+    if (e.to && !ids[e.to]) err(`edge ${e.id} の to("${e.to}")が nodes に存在しません`);
+    if (e.from && e.to && e.from === e.to) warn(`edge ${e.id} は from と to が同じノードです（自己ループ）`);
+    if (e.routing != null && !["straight", "arc-bottom"].includes(e.routing)) {
+      err(`edge ${e.id} の routing は straight または arc-bottom である必要があります`);
+    }
+
+    if (!Array.isArray(e.history) || e.history.length === 0) {
+      err(`edge ${e.id} の history が空です`);
+    } else {
+      e.history.forEach((h, hi) => {
+        if (!isValidStepValue(h.step) || !h.label) {
+          err(`edge ${e.id} の history[${hi}] には step(数値、または "YYYY-MM-DD HH:MM" 形式の時刻) と label が必要です`);
+        } else {
+          stepKindsUsed.add(stepKind(h.step));
+        }
+        if (h.style != null && !KNOWN_STYLES.includes(h.style)) {
+          warn(`edge ${e.id} の history[${hi}].style "${h.style}" は既知のスタイル(${KNOWN_STYLES.join("/")})に無いため、"solid"として扱われます`);
+        }
+        if (h.color != null && !KNOWN_EDGE_COLORS.includes(h.color)) {
+          warn(`edge ${e.id} の history[${hi}].color "${h.color}" は既知の色(${KNOWN_EDGE_COLORS.join("/")})に無いため、"default"として扱われます`);
+        }
+        if (h.weight != null && !KNOWN_EDGE_WEIGHTS.includes(h.weight)) {
+          warn(`edge ${e.id} の history[${hi}].weight "${h.weight}" は既知の太さ(${KNOWN_EDGE_WEIGHTS.join("/")})に無いため、"normal"として扱われます`);
+        }
+        if (h.soundEffect != null) {
+          warn(`edge ${e.id} の history[${hi}].soundEffect は効果がありません（エンジンが読むのは timeline[].soundEffect だけです）`);
+        }
+        if (h.icon != null) {
+          if (typeof h.icon !== "string") {
+            err(`edge ${e.id} の history[${hi}].icon は文字列である必要があります`);
+          } else if (!KNOWN_EDGE_ICONS.includes(h.icon)) {
+            const hasMatchingAsset = dsl.assets && Object.prototype.hasOwnProperty.call(dsl.assets, h.icon);
+            if (!hasMatchingAsset) {
+              warn(`edge ${e.id} の history[${hi}].icon "${h.icon}" は既知のアイコン(${KNOWN_EDGE_ICONS.join("/")})に無く、` +
+                `同名のassetsも見つからないため、文字列ラベルにフォールバックします`);
+            }
+          }
+        }
+      });
+    }
+  });
+
+  // ---- timeline ----
+  const timeline = Array.isArray(dsl.timeline) ? dsl.timeline : [];
+  const focusedNodeIds = new Set();
+  timeline.forEach((t, i) => {
+    const tag = `timeline[${i}]`;
+    if (!t || typeof t !== "object") { err(`${tag} はオブジェクトである必要があります`); return; }
+    if (!isValidStepValue(t.step) || typeof t.narrative !== "string") {
+      err(`${tag} には step(数値、または "YYYY-MM-DD HH:MM" 形式の時刻) と narrative(文字列) が必要です`);
+    } else {
+      stepKindsUsed.add(stepKind(t.step));
+    }
+    if (t.narrative && t.narrative.length > 120) {
+      warn(`timeline step ${t.step} の narrative が長め(${t.narrative.length}字)です。ナレーションバーで折り返しが多くなる可能性があります`);
+    }
+    if (t.focus) {
+      const f = t.focus;
+      if (f.nodeId) {
+        if (!ids[f.nodeId]) err(`timeline step ${t.step} の focus.nodeId("${f.nodeId}")が存在しません`);
+        focusedNodeIds.add(f.nodeId);
+      }
+      if (f.nodeIds) {
+        if (!Array.isArray(f.nodeIds) || f.nodeIds.length === 0) {
+          err(`timeline step ${t.step} の focus.nodeIds は1件以上の配列が必要です`);
+        } else {
+          f.nodeIds.forEach((nid) => {
+            if (!ids[nid]) err(`timeline step ${t.step} の focus.nodeIds に存在しないID("${nid}")があります`);
+            focusedNodeIds.add(nid);
+          });
+        }
+      }
+      if (f.edgeId) {
+        if (!seenEdgeIds.has(f.edgeId)) err(`timeline step ${t.step} の focus.edgeId("${f.edgeId}")が存在しません`);
+        const e = edges.find((x) => x.id === f.edgeId);
+        if (e) { focusedNodeIds.add(e.from); focusedNodeIds.add(e.to); }
+      }
+      if (!f.nodeId && !f.nodeIds && !f.edgeId) {
+        warn(`timeline step ${t.step} の focus には nodeId/nodeIds/edgeId のいずれも無く、常に全体を見渡す引きの画角になります（意図的でなければ指定を検討してください）`);
+      }
+    }
+    if (t.activeEdge && !seenEdgeIds.has(t.activeEdge)) {
+      err(`timeline step ${t.step} の activeEdge("${t.activeEdge}")が存在しません`);
+    }
+    if (t.soundEffect != null && looksLikeMistypedEffect(t.soundEffect)) {
+      warn(`timeline step ${t.step} の soundEffect "${t.soundEffect}" は戦闘・対立エフェクトの表記に似ていますが、正しい形式（"${KNOWN_EFFECT_KINDS.join('"/"')}"のいずれか、または"light_"/"medium_"/"heavy_"を付けたもの）と一致しないため、汎用フラッシュにフォールバックします`);
+    }
+  });
+
+  // ---- 横断的な警告 ----
+  if (stepKindsUsed.has("number") && stepKindsUsed.has("timestamp")) {
+    warn("stepの値に数値とタイムスタンプ文字列が混在しています。両者の大小関係は意味を持たないため、同じ物語内では統一することを推奨します");
+  }
+  nodes.forEach((n) => {
+    if (n.id && !focusedNodeIds.has(n.id)) {
+      warn(`node ${n.id} は一度もtimelineのfocusで参照されていません（画面に映らないまま話が進む可能性があります）`);
+    }
+  });
+
+  // グループの同時人数チェックは、構造的に破綻していない（errors無し）場合のみ実行する
+  // （壊れたDSLに対して意味のないノイズ警告を出さないため）
+  if (errors.length === 0) {
+    try {
+      checkGroupCapacity(dsl, warn);
+    } catch (e) {
+      // 容量チェック自体で予期せぬ例外が起きても、本来のバリデーション結果には影響させない
+      warn("グループの同時人数チェック中にエラーが発生したため、このチェックはスキップされました: " + e.message);
+    }
+  }
+
+  return {
+    valid: errors.length === 0,
+    errors: Array.from(new Set(errors)),
+    warnings: Array.from(new Set(warnings)),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// 曖昧な対立表現の検出
+//
+// 「戦い」「けんか」「ファイト」のような言葉は、実際に何が起きているか
+// （言葉だけの口論なのか、殴り合いなのか、刃物や銃器が絡むのか）を特定しない。
+// にもかかわらず、対応するsoundEffectを1つ選ぶと見る者の印象は大きく変わる
+// （非物理か物理か、で色も演出も全く違う）。
+//
+// 判定は3段階：
+// 1. 物語中に特定の武器を示す語（銃・刀・大砲等）が明文化されていれば、それが正解。
+//    初期設定（worldConfig）より優先し、忠実にその種類を採用する（質問不要）。
+//    ※worldConfigは「上限（キャップ）」ではなく「何も書かれていない時の初期設定」であり、
+//    物語の展開でそれを超える暴力が明文化されれば、そちらに従う。
+// 2. 死傷等、深刻な事態を示す語はあるが具体的な手段（何で？）が不明な場合は、
+//    初期設定を機械的に当てはめるだけの根拠にならないため、依頼者に確認する。
+// 3. 深刻化の兆候が物語のどこにも無ければ、初期設定（worldConfigがあればそれ、
+//    無ければ既定値）を適用してよい（質問不要）。
+// ---------------------------------------------------------------------------
+
+const AMBIGUOUS_CONFLICT_WORDS = [
+  "戦い", "戦闘", "争い", "抗争", "けんか", "喧嘩", "ファイト", "衝突",
+  "対立", "もめ事", "揉め事", "小競り合い", "乱闘", "襲撃", "攻撃", "交戦"
+];
+
+// これらの語が含まれていれば「けんか」寄り（素手の物理）、それ以外は「口論」寄りとみなす
+const PHYSICAL_LEANING_WORDS = ["けんか", "喧嘩", "乱闘", "ファイト", "小競り合い", "襲撃"];
+
+// 物語のどこかに特定の武器を示す語があれば、それが具体的に何を指すかは明文化されている
+// ということなので、初期設定（worldConfig）より優先し、忠実にその種類を採用する。
+// 優先順位：大砲 > 銃器 > 刃物（複数該当する場合、最も重大なものを採用）
+const WEAPON_KIND_SIGNALS = {
+  cannon: ["大砲", "砲撃", "爆発", "爆弾"],
+  gunfire: ["銃", "拳銃", "撃たれ", "射殺", "銃撃"],
+  clash: ["刀", "剣", "斬られ", "刺され"],
+};
+const WEAPON_KIND_PRIORITY = ["cannon", "gunfire", "clash"];
+
+// 武器の種類までは特定できないが、「何かしら深刻な事態が起きた」ことを示す語。
+// これだけでは種類が決まらないため、初期設定を無条件で適用せず、確認が必要になる。
+const GENERIC_SEVERITY_WORDS = ["死", "殺", "血", "怪我", "負傷", "殺害", "武器"];
+
+const CONFLICT_KIND_OPTIONS = [
+  { label: "言葉だけの口論（非物理）", soundEffect: "argument" },
+  { label: "取っ組み合い・殴り合い（素手の物理的暴力）", soundEffect: "punch" },
+  { label: "刃物での斬り合い", soundEffect: "clash" },
+  { label: "銃撃戦", soundEffect: "gunfire" },
+  { label: "砲撃・大規模な武力衝突", soundEffect: "cannon" },
+  { label: "特定しない／エフェクトを付けない", soundEffect: null },
+];
+
+const CONFLICT_INTENSITY_OPTIONS = [
+  { label: "軽い（light）", value: "light" },
+  { label: "普通（medium）", value: "medium" },
+  { label: "激しい（heavy）", value: "heavy" },
+];
+
+// ---------------------------------------------------------------------------
+// worldConfig（ストーリーごとの初期設定）
+//
+// 「このストーリーでは自動で決まってほしい」というニーズに応えるためのもの。
+// ストーリーを作り始める前に1度だけ聞き取りを済ませ、その結果をファイルとして持たせておけば、
+// 以降は物語のたびに質問することなく、常にそのポリシーに沿って自動解決される。
+// ---------------------------------------------------------------------------
+
+// 種類の強さの順序（口論が最も穏やか、砲撃が最も激しい）
+const KIND_RANK = { argument: 0, punch: 1, clash: 2, gunfire: 3, cannon: 4 };
+const RANK_TO_KIND = ["argument", "punch", "clash", "gunfire", "cannon"];
+
+// violenceLevel は「このストーリーで、何も明文化されていない時の初期設定」を表す（上限ではない）
+const VIOLENCE_LEVEL_RANK = {
+  none: 0,        // 非暴力（口論のみ）
+  verbal_only: 0, // noneの別名
+  unarmed: 1,     // 素手の小競り合いまで
+  bladed: 2,      // 刃物まで
+  firearms: 3,    // 銃器まで
+  any: 4,         // 大砲等、上限なし
+};
+
+const INTENSITY_RANK = { light: 0, medium: 1, heavy: 2 };
+const RANK_TO_INTENSITY = ["light", "medium", "heavy"];
+
+/**
+ * worldConfigの形が正しいかを検証する。
+ * @param {any} config
+ * @returns {{ valid: boolean, errors: string[] }}
+ */
+function validateWorldConfig(config) {
+  const errors = [];
+  if (!config || typeof config !== "object") {
+    return { valid: false, errors: ["worldConfigはオブジェクトである必要があります"] };
+  }
+  if (config.violenceLevel != null && VIOLENCE_LEVEL_RANK[config.violenceLevel] == null) {
+    errors.push(`violenceLevel は ${Object.keys(VIOLENCE_LEVEL_RANK).join("/")} のいずれかである必要があります`);
+  }
+  if (config.maxIntensity != null && INTENSITY_RANK[config.maxIntensity] == null) {
+    errors.push(`maxIntensity は ${Object.keys(INTENSITY_RANK).join("/")} のいずれかである必要があります`);
+  }
+  if (config.defaultIntensity != null && INTENSITY_RANK[config.defaultIntensity] == null) {
+    errors.push(`defaultIntensity は ${Object.keys(INTENSITY_RANK).join("/")} のいずれかである必要があります`);
+  }
+  if (config.allowedKinds != null) {
+    if (!Array.isArray(config.allowedKinds) || !config.allowedKinds.length) {
+      errors.push("allowedKinds は1件以上の配列である必要があります");
+    } else {
+      config.allowedKinds.forEach((k) => {
+        if (KIND_RANK[k] == null) {
+          errors.push(`allowedKinds の値 "${k}" は ${Object.keys(KIND_RANK).join("/")} のいずれかである必要があります`);
+        }
+      });
+    }
+  }
+  if (config.defaultEdgeColor != null && !KNOWN_EDGE_COLORS.includes(config.defaultEdgeColor)) {
+    errors.push(`defaultEdgeColor は ${KNOWN_EDGE_COLORS.join("/")} のいずれかである必要があります`);
+  }
+  if (config.defaultEdgeWeight != null && !KNOWN_EDGE_WEIGHTS.includes(config.defaultEdgeWeight)) {
+    errors.push(`defaultEdgeWeight は ${KNOWN_EDGE_WEIGHTS.join("/")} のいずれかである必要があります`);
+  }
+  return { valid: errors.length === 0, errors };
+}
+
+/**
+ * worldConfigから、このストーリーで選択肢として成立する種類の一覧を取り出す。
+ * allowedKindsが明示されていればそれを使う。無ければnull（絞り込みなし＝実装済みの
+ * 全種類を提示）。プリセット（時代区分等）は用意しない――AIは十分な判断力を持つため、
+ * ストーリーごとに何が自然かはAI自身が考えれば足りる。固定リストで選択肢を縛るより、
+ * 「関係性エフェクトの設計原則」（authoring-guide.md参照）に従って必要なら新しい種類を
+ * その場で定義できる方が、選択の幅は広がる。
+ * @param {any} worldConfig
+ * @returns {string[] | null}
+ */
+function getAllowedKinds(worldConfig) {
+  if (!worldConfig) return null;
+  if (Array.isArray(worldConfig.allowedKinds) && worldConfig.allowedKinds.length) {
+    return worldConfig.allowedKinds;
+  }
+  return null;
+}
+
+/**
+ * worldConfig（＝「何も書かれていない時の初期設定」）に基づいて、
+ * 曖昧語の一致結果からsoundEffectを1つ、質問せずに確定させる。
+ * この関数は「物語に深刻化の兆候が一切無い」場合にのみ呼ばれる想定
+ * （＝ここでの判断は初期設定の適用であって、明文化された記述の上書きではない）。
+ */
+function resolveWithWorldConfig(matched, worldConfig) {
+  const leansPhysical = matched.some((w) => PHYSICAL_LEANING_WORDS.includes(w));
+  const violenceRank = VIOLENCE_LEVEL_RANK[worldConfig.violenceLevel] != null
+    ? Math.min(VIOLENCE_LEVEL_RANK[worldConfig.violenceLevel], KIND_RANK.punch)
+    : KIND_RANK.punch;
+
+  // allowedKindsが指定されていれば、その範囲を超える種類は選ばれないようにする
+  const allowedKinds = getAllowedKinds(worldConfig);
+  const eraMaxRank = allowedKinds
+    ? Math.max.apply(null, allowedKinds.map((k) => KIND_RANK[k]).filter((r) => r != null))
+    : KIND_RANK.cannon;
+  const baselineRank = Math.min(violenceRank, eraMaxRank);
+
+  const kind = RANK_TO_KIND[leansPhysical ? baselineRank : Math.min(baselineRank, KIND_RANK.argument)];
+
+  const maxIntensityRank = INTENSITY_RANK[worldConfig.maxIntensity] != null
+    ? INTENSITY_RANK[worldConfig.maxIntensity]
+    : INTENSITY_RANK.heavy;
+  const defaultIntensityRank = INTENSITY_RANK[worldConfig.defaultIntensity] != null
+    ? INTENSITY_RANK[worldConfig.defaultIntensity]
+    : INTENSITY_RANK.light; // 疑わしきはライトに
+  const intensity = RANK_TO_INTENSITY[Math.min(defaultIntensityRank, maxIntensityRank)];
+
+  return kind === "argument" ? `${intensity}_argument` : `${intensity}_${kind}`;
+}
+
+/**
+ * 物語全体（全timelineのnarrative）を走査し、次の2種類の兆候を検出する：
+ * - explicitKind: 特定の武器を示す語が見つかった場合、その種類（"cannon"/"gunfire"/"clash"）。
+ *   複数該当する場合は最も重大なものを優先する。これは「明文化された記述」なので、
+ *   初期設定（worldConfig）より優先して忠実に従う。
+ * - genericSeverity: 武器の種類は特定できないが、死傷など深刻な事態を示す語がある場合true。
+ *   種類を決める根拠が無いため、初期設定を機械的に当てはめず、依頼者に確認する。
+ */
+function detectStoryEscalation(dsl) {
+  const timeline = Array.isArray(dsl && dsl.timeline) ? dsl.timeline : [];
+  const allText = timeline
+    .map((t) => (t && typeof t.narrative === "string" ? t.narrative : ""))
+    .join(" ");
+
+  let explicitKind = null;
+  for (const kind of WEAPON_KIND_PRIORITY) {
+    if (WEAPON_KIND_SIGNALS[kind].some((w) => allText.includes(w))) {
+      explicitKind = kind;
+      break;
+    }
+  }
+  const genericSeverity = GENERIC_SEVERITY_WORDS.some((w) => allText.includes(w));
+  return { explicitKind, genericSeverity };
+}
+
+/**
+ * DSLのtimeline全体を走査し、曖昧な対立表現が含まれるnarrativeを検出する。
+ *
+ * 判定は3段階（詳細は本ファイル冒頭のコメント参照）：
+ * 1. 物語中に特定の武器を示す語が明文化されていれば、それに忠実に従う
+ *    （`autoResolved: true`, `resolvedBy: "explicitInStory"`）。worldConfigより優先する。
+ * 2. 死傷等はあるが手段が不明なら、依頼者に確認する
+ *    （`autoResolved: false`, `resolvedBy: "needsHumanInput"`）。
+ * 3. 深刻化の兆候が物語のどこにも無ければ、worldConfig（あれば）または既定値を適用する
+ *    （`autoResolved: true`, `resolvedBy: "worldConfig"` または `"noEscalationSignal"`）。
+ *
+ * @param {any} dsl
+ * @param {any} [worldConfig] 省略可。あらかじめ聞き取り済みのストーリー全体の初期設定
+ * @returns {Array<Object>}
+ */
+function findAmbiguousConflictTerms(dsl, worldConfig) {
+  const findings = [];
+  const timeline = Array.isArray(dsl && dsl.timeline) ? dsl.timeline : [];
+  const useWorldConfig = worldConfig != null && validateWorldConfig(worldConfig).valid;
+  const escalation = detectStoryEscalation(dsl);
+
+  timeline.forEach((t) => {
+    if (!t || typeof t.narrative !== "string") return;
+    const matched = AMBIGUOUS_CONFLICT_WORDS.filter((w) => t.narrative.includes(w));
+    if (!matched.length) return;
+
+    if (escalation.explicitKind) {
+      // 物語中に特定の武器が明文化されている：これが正解。初期設定より優先し、忠実に従う。
+      const intensityRank = worldConfig && INTENSITY_RANK[worldConfig.defaultIntensity] != null
+        ? INTENSITY_RANK[worldConfig.defaultIntensity]
+        : INTENSITY_RANK.light; // 疑わしきはライトに（種類は明文化されていても、強度まではそうとは限らない）
+      const intensity = RANK_TO_INTENSITY[intensityRank];
+      findings.push({
+        step: t.step,
+        narrative: t.narrative,
+        matchedWord: matched[0],
+        matchedWords: matched,
+        autoResolved: true,
+        resolvedBy: "explicitInStory",
+        suggestedSoundEffect: `${intensity}_${escalation.explicitKind}`,
+        reason:
+          `物語中に「${escalation.explicitKind}」を示す具体的な記述があるため、初期設定（worldConfig）` +
+          "よりもそちらを優先し、忠実に反映しています。worldConfigは「何も書かれていない時の初期設定」" +
+          "であり、物語の展開で明文化された内容を上書きするものではありません。",
+      });
+      return;
+    }
+
+    if (escalation.genericSeverity) {
+      // 死傷等、深刻な事態を示す語はあるが、具体的な手段（何によるものか）が不明。
+      // 初期設定を機械的に当てはめる根拠にならないため、依頼者に確認する。
+      // ただし選択肢そのものは、worldConfig.allowedKindsが指定されていればそれで絞り込む
+      // （石器時代の物語に「銃撃戦」を選択肢として出す意味が無いため）。
+      const allowedKinds = getAllowedKinds(worldConfig);
+      const filteredKindOptions = allowedKinds
+        ? CONFLICT_KIND_OPTIONS.filter((o) => o.soundEffect == null || allowedKinds.includes(o.soundEffect))
+        : CONFLICT_KIND_OPTIONS;
+      findings.push({
+        step: t.step,
+        narrative: t.narrative,
+        matchedWord: matched[0],
+        matchedWords: matched,
+        autoResolved: false,
+        resolvedBy: "needsHumanInput",
+        kindQuestion: `timeline step ${t.step}「${t.narrative}」の「${matched[0]}」は、具体的にどの種類の対立ですか？（物語中に深刻な事態を示す記述がありますが、手段が特定できないため確認が必要です）`,
+        kindOptions: filteredKindOptions,
+        intensityQuestion: `その「${matched[0]}」は、どの程度の激しさですか？`,
+        intensityOptions: CONFLICT_INTENSITY_OPTIONS,
+        recommendedIfUnsure: {
+          intensity: "light",
+          note:
+            "依頼者が種類・程度を明確に答えられない場合は、方針「疑わしきはライトに」に基づき " +
+            "intensity は light をデフォルトとして採用してよい（質問自体は省略しないこと）。",
+        },
+      });
+      return;
+    }
+
+    // 深刻化の兆候が物語のどこにも無い：初期設定（worldConfig）を適用してよい。質問不要。
+    if (useWorldConfig) {
+      findings.push({
+        step: t.step,
+        narrative: t.narrative,
+        matchedWord: matched[0],
+        matchedWords: matched,
+        autoResolved: true,
+        resolvedBy: "worldConfig",
+        suggestedSoundEffect: resolveWithWorldConfig(matched, worldConfig),
+        reason:
+          "物語に深刻化の兆候が無いため、初期設定（worldConfig）を適用しています。" +
+          "物語の展開で明文化された記述が出てくれば、そちらが優先されます。",
+      });
+      return;
+    }
+
+    const leansPhysical = matched.some((w) => PHYSICAL_LEANING_WORDS.includes(w));
+    findings.push({
+      step: t.step,
+      narrative: t.narrative,
+      matchedWord: matched[0],
+      matchedWords: matched,
+      autoResolved: true,
+      resolvedBy: "noEscalationSignal",
+      suggestedSoundEffect: leansPhysical ? "light_punch" : "light_argument",
+      reason:
+        "物語全体に深刻化の兆候（死傷・武器）が見当たらないため、素手の範囲（口論または殴り合い）で" +
+        "自動的に決めています。強度も「疑わしきはライトに」の方針に基づき light を採用しています。" +
+        "質問せずこの値を採用して構いません。",
+    });
+  });
+  return findings;
+}
+
+module.exports = {
+  validateDsl,
+  isValidStepValue,
+  isValidTimeOfDayString,
+  estimateGroupCapacity,
+  checkGroupCapacity,
+  findAmbiguousConflictTerms,
+  detectStoryEscalation,
+  validateWorldConfig,
+  resolveWithWorldConfig,
+  getAllowedKinds,
+  KNOWN_ICONS,
+  KNOWN_STYLES,
+  KNOWN_EFFECT_KINDS,
+  KNOWN_STATUS_ICONS,
+  KNOWN_STATUS_CORNERS,
+  KNOWN_EDGE_ICONS,
+  KNOWN_EDGE_COLORS,
+  KNOWN_EDGE_WEIGHTS,
+};

@@ -1,0 +1,7 @@
+node_modules/
+mcp/node_modules/
+*.zip
+_rel_*.html
+_dsl_*.json
+.DS_Store
+Thumbs.db

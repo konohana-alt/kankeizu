@@ -1,0 +1,10 @@
+{
+  "worldName": "",
+  "violenceLevel": "unarmed",
+  "maxIntensity": "heavy",
+  "defaultIntensity": "medium",
+  "defaultEdgeColor": "default",
+  "defaultEdgeWeight": "normal",
+  "allowedKinds": null,
+  "notes": ""
+}

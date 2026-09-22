@@ -1,0 +1,11 @@
+{
+  "name": "kankeizu-dsl-mcp",
+  "version": "0.1.0",
+  "description": "MCP server for authoring and validating \"kankeizu!\" relationship-diagram DSL scenarios",
+  "main": "server.js",
+  "bin": { "kankeizu-dsl-mcp": "./server.js" },
+  "scripts": { "start": "node server.js" },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0"
+  }
+}
