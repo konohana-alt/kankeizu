@@ -420,12 +420,26 @@
         <div class="step">
           <div class="step-num">3</div>
           <div class="step-body">
-            <h3>AI に DSL を書かせる（推奨）</h3>
-            <p><code>mcp/</code> を MCP クライアントに登録し、<code>agent-prompt.md</code> の手順に沿って Claude や Gemini に DSL を生成させる。<code>validate_dsl</code> で自動検証。</p>
+            <h3>AI に DSL を書かせる — Remote MCP（インストール不要）</h3>
+            <p>Claude Desktop / Claude Code の設定に以下を追加するだけで、<code>validate_dsl</code> など全ツールが使える。Node.js・インストール不要。</p>
+            <pre style="margin-top:10px;background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:12px;font-size:.8rem;overflow-x:auto;line-height:1.6;">{
+  "mcpServers": {
+    "kankeizu-dsl": {
+      "url": "https://nwkjo52kv6.execute-api.ap-northeast-1.amazonaws.com/prod/"
+    }
+  }
+}</pre>
           </div>
         </div>
         <div class="step">
           <div class="step-num">4</div>
+          <div class="step-body">
+            <h3>AI に DSL を書かせる — ローカル MCP（Node.js がある場合）</h3>
+            <p><code>mcp/</code> フォルダをダウンロードして <code>npm install</code>。<code>agent-prompt.md</code> の手順に沿って Claude や Gemini に DSL を生成させる。</p>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">5</div>
           <div class="step-body">
             <h3>公開する</h3>
             <p>✏️ 編集モードで位置を微調整し、📤 公開ボタンで閲覧専用 HTML を生成して配布する。</p>
