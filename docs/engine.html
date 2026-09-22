@@ -3150,13 +3150,34 @@ var rough=function(){"use strict";function t(t,e,s){if(t&&t.length){const[n,o]=e
 
   /* =========================================================
      5. 外部インターフェース
-     a) URLパラメータ ?dsl=... (encodeURIComponent(JSON) または base64)
-     b) postMessage({ type: "kankeizu:dsl", dsl: {...} })
-     c) DSL編集パネルからのJSON直渡し
+     a) URLパラメータ ?url=... (JSONファイルのURL。GitHub raw等CORSが通るURL)
+     b) URLパラメータ ?dsl=... (encodeURIComponent(JSON) または base64)
+     c) postMessage({ type: "kankeizu:dsl", dsl: {...} })
+     d) DSL編集パネルからのJSON直渡し
   ========================================================= */
   function tryLoadFromUrl(){
+    var params = new URLSearchParams(window.location.search);
+
+    // ?url= : 外部JSONファイルをfetchして読み込む
+    var fileUrl = params.get("url");
+    if (fileUrl) {
+      fetch(fileUrl)
+        .then(function(res){
+          if (!res.ok) throw new Error("HTTP " + res.status + ": " + fileUrl);
+          return res.json();
+        })
+        .then(function(parsed){
+          loadDsl(parsed);
+        })
+        .catch(function(err){
+          console.error("URL fetch failed:", err);
+          showDslError("?url= の読み込みに失敗しました: " + String(err.message || err));
+        });
+      return true;
+    }
+
+    // ?dsl= : JSON文字列をURLパラメータに直接埋め込む
     try {
-      var params = new URLSearchParams(window.location.search);
       var raw = params.get("dsl");
       if (!raw) return false;
       var parsed;
