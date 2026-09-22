@@ -420,7 +420,19 @@
         <div class="step">
           <div class="step-num">3</div>
           <div class="step-body">
-            <h3>AI に DSL を書かせる</h3>
+            <h3>ブラウザの AI チャットで DSL を作る</h3>
+            <p>Claude.ai・Gemini・ChatGPT 等のブラウザ AI に、以下のように伝えるだけ：</p>
+            <div style="margin-top:10px;background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:12px;font-size:.85rem;line-height:1.7;color:var(--text2);">
+              次のガイドを読んで、[あなたの物語] の DSL を生成してください。<br>
+              ガイド: <span style="color:var(--accent);">https://raw.githubusercontent.com/konohana-alt/kankeizu/main/mcp/authoring-guide.md</span>
+            </div>
+            <p style="margin-top:8px;font-size:.82rem;color:var(--text2);">出てきた JSON を <a href="./validate.html" target="_blank">バリデーター</a> で確認してからエンジンに貼る。</p>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">4</div>
+          <div class="step-body">
+            <h3>Claude / Gemini アプリで MCP を使う（より確実）</h3>
             <p>Claude Desktop / Claude Code の設定に以下を追加するだけ。Node.js・インストール不要で <code>validate_dsl</code> など全ツールが使える。</p>
             <pre style="margin-top:10px;background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:12px;font-size:.8rem;overflow-x:auto;line-height:1.6;">{
   "mcpServers": {
@@ -433,7 +445,7 @@
           </div>
         </div>
         <div class="step">
-          <div class="step-num">4</div>
+          <div class="step-num">5</div>
           <div class="step-body">
             <h3>公開する</h3>
             <p>✏️ 編集モードで位置を微調整し、📤 公開ボタンで閲覧専用 HTML を生成して配布する。</p>
